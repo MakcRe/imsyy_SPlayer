@@ -117,6 +117,39 @@ export class LocalMusicService {
     }
   }
 
+  /** 从 Buffer 提取并保存封面 */
+  private async saveCoverFromBuffer(
+    bufferData: Buffer,
+    fileId: string,
+  ): Promise<string | undefined> {
+    const { coverDir } = this.paths;
+    const fileName = `${fileId}.jpg`;
+    const savePath = join(coverDir, fileName);
+
+    if (existsSync(savePath)) return fileName;
+
+    try {
+        const img = nativeImage.createFromBuffer(bufferData);
+        if (img.isEmpty()) return undefined;
+
+        // 调整大小并压缩
+        const processedBuffer = img
+            .resize({
+                width: 256,
+                height: 256,
+                quality: "better",
+            })
+            .toJPEG(80);
+
+        const cacheService = CacheService.getInstance();
+        await cacheService.put("local-data", `covers/${fileName}`, processedBuffer);
+        return fileName;
+    } catch (e) {
+        console.error("Failed to save cover from buffer:", e);
+        return undefined;
+    }
+  }
+
   /**
    * 刷新所有库文件夹
    * @param dirPaths 文件夹路径数组
@@ -272,12 +305,12 @@ export class LocalMusicService {
 
             if (isRustEntry(entry)) {
                 // Rust 已经提供了元数据，我们尝试获取封面
-                try {
-                    // 仅为了封面而解析
-                    const metadata = await parseFile(filePath);
-                    coverPath = await this.extractCover(metadata, id);
-                } catch (e) {
-                    // 忽略封面解析错误，使用 Rust 提供的基本信息
+                if (entry.coverData) {
+                    try {
+                        coverPath = await this.saveCoverFromBuffer(Buffer.from(entry.coverData), id);
+                    } catch (e) {
+                        console.error("Failed to save cover from rust buffer:", e);
+                    }
                 }
 
                 track = {
